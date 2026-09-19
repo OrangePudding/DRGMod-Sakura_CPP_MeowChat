@@ -286,6 +286,26 @@ namespace MeowChat
         if (!g_cfg_enabled || g_cfg_suffix.empty()) return str;
         if (str.empty()) return str;
 
+        // Idempotency marker: the suffix with its own trailing spaces and
+        // punctuation removed. Once a message is meowed, the next pass
+        // re-parses the suffix tail into the punctuation run (with
+        // Suffix = "喵 ~" the next pass sees the text part "hello喵"),
+        // so the check must compare against the suffix core. A suffix made
+        // entirely of spaces/punctuation has no detectable core and could
+        // never be recognized again, so it is disabled instead.
+        std::wstring suffixCore = g_cfg_suffix;
+        {
+            size_t cpos = suffixCore.size();
+            while (cpos > 0)
+            {
+                wchar_t ch = suffixCore[cpos - 1];
+                if (ch == L' ' || IsMiaoPunc(ch)) --cpos;
+                else break;
+            }
+            if (cpos == 0) return str;
+            suffixCore.resize(cpos);
+        }
+
         // strip trailing whitespace
         std::wstring work = str;
         while (!work.empty() && iswspace(work.back())) work.pop_back();
@@ -309,9 +329,9 @@ namespace MeowChat
         std::wstring main = work.substr(0, pos);
         std::wstring tail = work.substr(pos);
 
-        // idempotent: text part already ends with the configured suffix
-        if (!main.empty() && main.size() >= g_cfg_suffix.size() &&
-            main.compare(main.size() - g_cfg_suffix.size(), g_cfg_suffix.size(), g_cfg_suffix) == 0) return str;
+        // idempotent: text part already ends with the suffix core
+        if (!main.empty() && main.size() >= suffixCore.size() &&
+            main.compare(main.size() - suffixCore.size(), suffixCore.size(), suffixCore) == 0) return str;
 
         // skip pure placeholder templates
         if (IsPurePlaceholders(work)) return str;
