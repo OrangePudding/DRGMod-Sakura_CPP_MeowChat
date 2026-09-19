@@ -25,7 +25,7 @@ Enabled = true
 Suffix = 喵
 
 # 是否也给发送者名称追加
-SenderEnabled = true
+SenderEnabled = false
 ```
 
 ## 加喵规则
