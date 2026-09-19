@@ -2,8 +2,6 @@
 #include <windows.h>
 
 #include <string>
-#include <cstdio>
-#include <cstdarg>
 #include <cwchar>
 #include <cstring>
 #include <cwctype>
@@ -89,7 +87,6 @@ namespace MeowChat
 
     static HMODULE g_hmod = nullptr;
     static HMODULE g_ue4ss = nullptr;
-    static std::wstring g_log_path;
     static std::wstring g_cfg_path;              // <mod dir>\config.txt
     static bool g_cfg_enabled = true;            // master switch
     static bool g_cfg_sender_enabled = true;     // also meow the sender name
@@ -106,8 +103,6 @@ namespace MeowChat
 
     static bool g_procsResolved = false;
 
-    static void Log(const wchar_t* fmt, ...);
-
     static void ResolveProcs()
     {
         if (g_procsResolved) return;
@@ -117,11 +112,9 @@ namespace MeowChat
         g_fnGetNext = (FField*& (*)(void*))GetProcAddress(g_ue4ss, "?GetNext@FField@Unreal@RC@@AEAAAEAPEAV123@XZ");
         g_fnFTextSetString = (void (*)(void*, const void*))GetProcAddress(g_ue4ss, "?SetString@FText@Unreal@RC@@QEAAX$$QEBVFString@23@@Z");
         g_procsResolved = true;
-        Log(L"proc: Locals=%p GetNext=%p FTextSetString=%p",
-            (void*)g_fnLocals, (void*)g_fnGetNext, (void*)g_fnFTextSetString);
     }
 
-    static void InitLogPath()
+    static void InitConfigPath()
     {
         wchar_t buf[MAX_PATH] = {0};
         DWORD n = GetModuleFileNameW(g_hmod, buf, MAX_PATH);
@@ -130,28 +123,7 @@ namespace MeowChat
         if (pos != std::wstring::npos) p = p.substr(0, pos);
         pos = p.rfind(L'\\');
         if (pos != std::wstring::npos) p = p.substr(0, pos);
-        g_log_path = p + L"\\meowchat.log";
         g_cfg_path = p + L"\\config.txt";
-        DeleteFileW(g_log_path.c_str());   // fresh log per game start
-    }
-
-    static void Log(const wchar_t* fmt, ...)
-    {
-        if (g_log_path.empty()) return;
-        wchar_t buf[1024] = {0};
-        va_list args;
-        va_start(args, fmt);
-        _vsnwprintf_s(buf, 1024, _TRUNCATE, fmt, args);
-        va_end(args);
-        FILE* f = nullptr;
-        if (_wfopen_s(&f, g_log_path.c_str(), L"a, ccs=UTF-8") == 0 && f)
-        {
-            SYSTEMTIME st;
-            GetLocalTime(&st);
-            fwprintf(f, L"[%02u:%02u:%02u.%03u] %s\n",
-                     (unsigned)st.wHour, (unsigned)st.wMinute, (unsigned)st.wSecond, (unsigned)st.wMilliseconds, buf);
-            fclose(f);
-        }
     }
 
     // =====================================================================
@@ -202,7 +174,6 @@ namespace MeowChat
                                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (h == INVALID_HANDLE_VALUE)
         {
-            Log(L"config: no config file, using defaults");
             return;
         }
         DWORD size = GetFileSize(h, nullptr);
@@ -233,8 +204,6 @@ namespace MeowChat
             else if (_wcsicmp(key.c_str(), L"Suffix") == 0) g_cfg_suffix = val;
             else if (_wcsicmp(key.c_str(), L"SenderEnabled") == 0) g_cfg_sender_enabled = ParseBoolValue(val, g_cfg_sender_enabled);
         }
-        Log(L"config: enabled=%d sender=%d suffix=%ls", g_cfg_enabled ? 1 : 0,
-            g_cfg_sender_enabled ? 1 : 0, g_cfg_suffix.c_str());
     }
 
     // Called every frame from on_update; only re-reads the file when its
@@ -252,7 +221,6 @@ namespace MeowChat
             {
                 g_cfg_had_file = false;
                 ResetConfigDefaults();
-                Log(L"config: config file removed, using defaults");
             }
             return;
         }
@@ -380,15 +348,8 @@ namespace MeowChat
         fs.Max = newNum;
     }
 
-    static void ApplyMeowFString(const wchar_t* tag, const std::wstring& raw, const std::wstring& miaoed, RawFString& out)
+    static void ApplyMeowFText(const std::wstring& miaoed, FText& msg)
     {
-        Log(L"meow[%s]: %ls -> %ls", tag, raw.c_str(), miaoed.c_str());
-        WriteRawFString(out, miaoed);
-    }
-
-    static void ApplyMeowFText(const wchar_t* tag, const std::wstring& raw, const std::wstring& miaoed, FText& msg)
-    {
-        Log(L"meow[%s]: %ls -> %ls", tag, raw.c_str(), miaoed.c_str());
         RawFString newFs{nullptr, 0, 0};
         WriteRawFString(newFs, miaoed);
         if (!newFs.Data) return;
@@ -399,21 +360,21 @@ namespace MeowChat
     }
 
     // Convenience: append meow to an in-place FString if the text changed.
-    static void ApplyMeowFStringIfNeeded(const wchar_t* tag, RawFString& fs)
+    static void ApplyMeowFStringIfNeeded(RawFString& fs)
     {
         std::wstring raw = ReadRawFString(fs);
         if (raw.empty()) return;
         std::wstring miaoed = EnsureMiao(raw);
-        if (miaoed != raw) ApplyMeowFString(tag, raw, miaoed, fs);
+        if (miaoed != raw) WriteRawFString(fs, miaoed);
     }
 
     // Convenience: append meow to an in-place FText if the text changed.
-    static void ApplyMeowFTextIfNeeded(const wchar_t* tag, FText& msg)
+    static void ApplyMeowFTextIfNeeded(FText& msg)
     {
         std::wstring tpl = msg.ToString();
         if (tpl.empty()) return;
         std::wstring miaoed = EnsureMiao(tpl);
-        if (miaoed != tpl) ApplyMeowFText(tag, tpl, miaoed, msg);
+        if (miaoed != tpl) ApplyMeowFText(miaoed, msg);
     }
 
     // =====================================================================
@@ -504,18 +465,18 @@ namespace MeowChat
             uint8_t* msgStruct = p + g_offClientMsgStruct;
             if (g_cfg_sender_enabled && g_offClientSenderField >= 0)
             {
-                ApplyMeowFStringIfNeeded(L"SendSender", *(RawFString*)(msgStruct + g_offClientSenderField));
+                ApplyMeowFStringIfNeeded(*(RawFString*)(msgStruct + g_offClientSenderField));
             }
-            ApplyMeowFStringIfNeeded(L"SendMsg", *(RawFString*)(msgStruct + g_offClientMsgField));
+            ApplyMeowFStringIfNeeded(*(RawFString*)(msgStruct + g_offClientMsgField));
         }
         else if (fn == g_fnClientNewLocalized && g_offLocalizedMsgStruct >= 0 && g_offLocalizedMsgField >= 0)
         {
             uint8_t* msgStruct = p + g_offLocalizedMsgStruct;
             if (g_cfg_sender_enabled && g_offLocalizedSenderField >= 0)
             {
-                ApplyMeowFStringIfNeeded(L"SendLocSender", *(RawFString*)(msgStruct + g_offLocalizedSenderField));
+                ApplyMeowFStringIfNeeded(*(RawFString*)(msgStruct + g_offLocalizedSenderField));
             }
-            ApplyMeowFTextIfNeeded(L"SendLocMsg", *(FText*)(msgStruct + g_offLocalizedMsgField));
+            ApplyMeowFTextIfNeeded(*(FText*)(msgStruct + g_offLocalizedMsgField));
         }
     }
 
@@ -530,7 +491,6 @@ namespace MeowChat
         __try { ChatRewriteCallbackImpl(ctx, fn, parms); }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            Log(L"hook: ProcessEvent rewrite exception 0x%08X", GetExceptionCode());
         }
     }
 
@@ -549,7 +509,7 @@ namespace MeowChat
         std::wstring raw = ReadRawFString(text);
         if (raw.empty()) return;
         std::wstring miaoed = EnsureMiao(raw);
-        if (miaoed != raw) ApplyMeowFString(L"ServerNewMessage", raw, miaoed, text);
+        if (miaoed != raw) WriteRawFString(text, miaoed);
     }
 
     // =====================================================================
@@ -566,13 +526,13 @@ namespace MeowChat
         uint8_t* msgStruct = parms + g_offClientMsgStruct;
         if (g_cfg_sender_enabled && g_offClientSenderField >= 0)
         {
-            ApplyMeowFStringIfNeeded(L"ClientSender", *(RawFString*)(msgStruct + g_offClientSenderField));
+            ApplyMeowFStringIfNeeded(*(RawFString*)(msgStruct + g_offClientSenderField));
         }
         RawFString& msg = *(RawFString*)(msgStruct + g_offClientMsgField);
         std::wstring raw = ReadRawFString(msg);
         if (raw.empty()) return;
         std::wstring miaoed = EnsureMiao(raw);
-        if (miaoed != raw) ApplyMeowFString(L"ClientNewMessage", raw, miaoed, msg);
+        if (miaoed != raw) WriteRawFString(msg, miaoed);
     }
 
     // =====================================================================
@@ -590,13 +550,13 @@ namespace MeowChat
         uint8_t* msgStruct = parms + g_offLocalizedMsgStruct;
         if (g_cfg_sender_enabled && g_offLocalizedSenderField >= 0)
         {
-            ApplyMeowFStringIfNeeded(L"LocSender", *(RawFString*)(msgStruct + g_offLocalizedSenderField));
+            ApplyMeowFStringIfNeeded(*(RawFString*)(msgStruct + g_offLocalizedSenderField));
         }
         FText& msg = *(FText*)(msgStruct + g_offLocalizedMsgField);
         std::wstring tpl = msg.ToString();
         if (tpl.empty()) return;
         std::wstring miaoed = EnsureMiao(tpl);
-        if (miaoed != tpl) ApplyMeowFText(L"ClientNewLocalized", tpl, miaoed, msg);
+        if (miaoed != tpl) ApplyMeowFText(miaoed, msg);
     }
 
     // ---- SEH wrappers: no exception (AV / C++ exception) can crash the game ----
@@ -605,7 +565,6 @@ namespace MeowChat
         __try { OnServerNewMessageImpl(ctx); }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            Log(L"hook: Server_NewMessage exception 0x%08X", GetExceptionCode());
         }
     }
 
@@ -614,7 +573,6 @@ namespace MeowChat
         __try { OnClientNewMessageImpl(ctx); }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            Log(L"hook: ClientNewMessage exception 0x%08X", GetExceptionCode());
         }
     }
 
@@ -623,7 +581,6 @@ namespace MeowChat
         __try { OnClientNewLocalizedImpl(ctx); }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            Log(L"hook: Client_NewLocalizedMessage exception 0x%08X", GetExceptionCode());
         }
     }
 
@@ -643,7 +600,7 @@ namespace MeowChat
         std::wstring raw = ReadRawFString(msg);
         if (raw.empty()) return;
         std::wstring miaoed = EnsureMiao(raw);
-        if (miaoed != raw) ApplyMeowFString(L"PostGameMessage", raw, miaoed, msg);
+        if (miaoed != raw) WriteRawFString(msg, miaoed);
     }
 
     static void OnPostLocalizedGameMessageImpl(UnrealScriptFunctionCallableContext& ctx)
@@ -656,7 +613,7 @@ namespace MeowChat
         std::wstring tpl = msg.ToString();
         if (tpl.empty()) return;
         std::wstring miaoed = EnsureMiao(tpl);
-        if (miaoed != tpl) ApplyMeowFText(L"PostLocalizedGameMessage", tpl, miaoed, msg);
+        if (miaoed != tpl) ApplyMeowFText(miaoed, msg);
     }
 
     static void OnPostGameMessage(UnrealScriptFunctionCallableContext& ctx, void*)
@@ -664,7 +621,6 @@ namespace MeowChat
         __try { OnPostGameMessageImpl(ctx); }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            Log(L"hook: PostGameMessage exception 0x%08X", GetExceptionCode());
         }
     }
 
@@ -673,7 +629,6 @@ namespace MeowChat
         __try { OnPostLocalizedGameMessageImpl(ctx); }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            Log(L"hook: PostLocalizedGameMessage exception 0x%08X", GetExceptionCode());
         }
     }
 
@@ -693,14 +648,7 @@ namespace MeowChat
             {
                 g_offServerText = FindPropOffset(g_fnServerNewMessage, L"Text");
                 if (g_offServerText >= 0)
-                {
                     g_serverHookId = g_fnServerNewMessage->RegisterPreHook(OnServerNewMessage);
-                    Log(L"hook: Server_NewMessage registered (Text@%d)", g_offServerText);
-                }
-                else
-                {
-                    Log(L"hook: Server_NewMessage has no Text param, skipped");
-                }
             }
         }
 
@@ -712,14 +660,7 @@ namespace MeowChat
             {
                 g_offClientMsgStruct = FindPropOffset(g_fnClientNewMessage, L"Msg");
                 if (g_offClientMsgStruct >= 0)
-                {
                     g_clientHookId = g_fnClientNewMessage->RegisterPreHook(OnClientNewMessage);
-                    Log(L"hook: ClientNewMessage registered (Msg@%d)", g_offClientMsgStruct);
-                }
-                else
-                {
-                    Log(L"hook: ClientNewMessage has no Msg param, skipped");
-                }
             }
         }
 
@@ -731,14 +672,7 @@ namespace MeowChat
             {
                 g_offLocalizedMsgStruct = FindPropOffset(g_fnClientNewLocalized, L"Msg");
                 if (g_offLocalizedMsgStruct >= 0)
-                {
                     g_localizedHookId = g_fnClientNewLocalized->RegisterPreHook(OnClientNewLocalized);
-                    Log(L"hook: Client_NewLocalizedMessage registered (Msg@%d)", g_offLocalizedMsgStruct);
-                }
-                else
-                {
-                    Log(L"hook: Client_NewLocalizedMessage has no Msg param, skipped");
-                }
             }
         }
 
@@ -750,14 +684,7 @@ namespace MeowChat
             {
                 g_offPostGameMsg = FindPropOffset(g_fnPostGameMessage, L"Msg");
                 if (g_offPostGameMsg >= 0)
-                {
                     g_postGameHookId = g_fnPostGameMessage->RegisterPreHook(OnPostGameMessage);
-                    Log(L"hook: PostGameMessage registered (Msg@%d)", g_offPostGameMsg);
-                }
-                else
-                {
-                    Log(L"hook: PostGameMessage has no Msg param, skipped");
-                }
             }
         }
 
@@ -769,14 +696,7 @@ namespace MeowChat
             {
                 g_offPostLocalizedMsg = FindPropOffset(g_fnPostLocalizedGameMessage, L"Msg");
                 if (g_offPostLocalizedMsg >= 0)
-                {
                     g_postLocalizedHookId = g_fnPostLocalizedGameMessage->RegisterPreHook(OnPostLocalizedGameMessage);
-                    Log(L"hook: PostLocalizedGameMessage registered (Msg@%d)", g_offPostLocalizedMsg);
-                }
-                else
-                {
-                    Log(L"hook: PostLocalizedGameMessage has no Msg param, skipped");
-                }
             }
         }
         // FFSDChatMessage::Msg field offset
@@ -787,13 +707,7 @@ namespace MeowChat
             if (chatStruct)
             {
                 g_offClientMsgField = FindPropOffset(chatStruct, L"Msg");
-                Log(L"hook: FFSDChatMessage.Msg@%d", g_offClientMsgField);
                 g_offClientSenderField = FindPropOffset(chatStruct, L"Sender");
-                Log(L"hook: FFSDChatMessage.Sender@%d", g_offClientSenderField);
-            }
-            else
-            {
-                Log(L"hook: FSDChatMessage struct not found");
             }
         }
 
@@ -805,13 +719,7 @@ namespace MeowChat
             if (locStruct)
             {
                 g_offLocalizedMsgField = FindPropOffset(locStruct, L"Msg");
-                Log(L"hook: FFSDLocalizedChatMessage.Msg@%d", g_offLocalizedMsgField);
                 g_offLocalizedSenderField = FindPropOffset(locStruct, L"Sender");
-                Log(L"hook: FFSDLocalizedChatMessage.Sender@%d", g_offLocalizedSenderField);
-            }
-            else
-            {
-                Log(L"hook: FSDLocalizedChatMessage struct not found");
             }
         }
 
@@ -824,7 +732,6 @@ namespace MeowChat
         if (serverOk && clientOk && locOk && postOk && postLocOk && procsOk)
         {
             g_hooksReady = true;
-            Log(L"hook: all hooks ready");
         }
     }
 
@@ -863,7 +770,6 @@ namespace MeowChat
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            Log(L"setup: exception 0x%08X", GetExceptionCode());
         }
         g_inSetup = false;
     }
@@ -880,14 +786,12 @@ namespace MeowChat
             ModVersion = L"0.1";
             ModDescription = L"Chat gets a meow suffix (crash-safe C++ port)";
             ModAuthors = L"Sakura";
-            InitLogPath();
-            Log(L"=== Sakura_CPP_MeowChat loaded ===");
+            InitConfigPath();
             TryReloadConfig();   // load config.txt right away
         }
 
         ~MyMod() override
         {
-            Log(L"mod destroyed, unregistering hooks");
             // Unregister so UE4SS hot-reload (Ctrl+R) never leaves dangling callbacks.
             if (g_serverHookId && g_fnServerNewMessage) g_fnServerNewMessage->UnregisterHook(g_serverHookId);
             if (g_clientHookId && g_fnClientNewMessage) g_fnClientNewMessage->UnregisterHook(g_clientHookId);
@@ -898,10 +802,8 @@ namespace MeowChat
 
         void on_program_start() override
         {
-            Log(L"on_program_start called");
             RC::Unreal::Hook::RegisterProcessEventPreCallback(GameThreadSetupCallback);
             RC::Unreal::Hook::RegisterProcessEventPreCallback(ChatRewriteCallback);
-            Log(L"setup: game-thread ProcessEvent hook registered");
         }
 
         void on_unreal_init() override

@@ -6,7 +6,7 @@
 - 玩家聊天正文、系统消息（如“X 挂了！”）、发送者名称都按规则加喵。
 - 主机在消息序列化进网络包之前就地改写，客机无需装 mod。
 - 幂等：正文结尾已是「喵」的消息不重复加。
-- 全部拦截点 SEH 保护，异常只记日志、不崩游戏。
+- 全部拦截点 SEH 保护，异常不会导致游戏崩溃。
 
 ## 安装
 1. 把 `dlls/main.dll` 放到游戏目录：
@@ -17,20 +17,18 @@
 4. 启动游戏，进入任意任务后生效。
 
 ## 配置
-mod 目录下可选 `config.txt`（UTF-8 编码，用记事本保存即可）。文件不存在时使用默认值；修改保存后**约 1 秒内生效**，无需重启游戏。
+mod 目录下可选 `config.txt`（UTF-8），没有则用默认值，保存后约 1 秒内生效。
 
-```
-# 总开关：关闭后不再追加任何字符
+```ini
+# 总开关
 Enabled = true
 
-# 追加到消息/发送者名末尾的字符（留空 = 不追加）
+# 追加到消息/发送者名末尾的文字（留空 = 不追加）
 Suffix = 喵
 
 # 是否也给发送者名称追加
 SenderEnabled = true
 ```
-
-布尔值支持 `true/false`、`1/0`、`yes/no`、`on/off`，键名不区分大小写，`#` 或 `;` 开头为注释。
 
 ## 加喵规则
 - 去掉句尾空白后，从后往前跳过标点（`！？。，～!?.,~…、`）和空格，在正文后插入「喵」，标点留在句尾。
@@ -54,7 +52,7 @@ SenderEnabled = true
 本地化消息只改 `Msg` 模板与 `Sender`，不改 `Arguments`，`FText::Format` 语义保持不变。
 
 ## 健壮性
-- 所有 hook 体包在 SEH（`__try/__except`）里，访问违例/C++ 异常一律吞掉并写日志。
+- 所有 hook 体包在 SEH（`__try/__except`）里，访问违例/C++ 异常一律吞掉，不会崩溃游戏。
 - 所有 UE 反射（hook 注册、GameState 定位）与配置热重载都在**游戏线程**的
   ProcessEvent 回调里执行（与 WelcomeMod 的冻结修复同一机制），不在 UE4SS 后台线程
   做任何 UE 操作；配置读写也回到同一线程，消除了原来后台线程读写 `g_cfg_*` 的数据竞争。
@@ -64,16 +62,6 @@ SenderEnabled = true
 - 替换 FString 时故意**不释放旧缓冲区**（避免与其他 mod 手工构造的 FString 造成堆不匹配），代价是每条被改写的消息泄漏几百字节。
 - 卸载/热重载（Ctrl+R）会注销全部 UFunction hook；ProcessEvent 回调由 UE4SS 全局持有，
   建议不要对该 mod 做 Ctrl+R 热重载（与 WelcomeMod 同限制）。
-
-## 日志
-日志写在 mod 目录 `meowchat.log`（每次启动清空）。预期输出：
-```
-hook: all hooks ready
-meow[ServerNewMessage]: 测试 -> 测试喵
-meow[SendSender]: ooyole_AR -> ooyole_AR喵
-meow[SendMsg]: 测试 -> 测试喵
-meow[SendLocMsg]: {0} 挂了！ -> {0} 挂了喵！
-```
 
 ## 重新编译
 源码在工程目录 `MeowChatMod`（依赖本机 UE4SS v3.0.1 SDK `RE-UE4SS` 与 VS2019），运行：
