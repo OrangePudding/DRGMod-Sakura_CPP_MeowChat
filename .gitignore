@@ -1,0 +1,9 @@
+# build artifacts
+*.dll
+*.lib
+exports_raw.txt
+ue4ss.def
+
+# runtime files
+*.log
+config.txt
