@@ -232,7 +232,7 @@ namespace MeowChat
     }
 
     // =====================================================================
-    // Meow logic, kept identical to the reference Lua mod:
+    // Meow logic:
     //   * strip trailing whitespace
     //   * walk backwards over trailing punctuation/space, insert ? right
     //     after the last text char (punctuation stays at the tail)
@@ -253,7 +253,7 @@ namespace MeowChat
         }
     }
 
-    // Equivalent to Lua: str:gsub("{%w+}", ""):gsub("%s+", "") == ""
+    // True if, after skipping all {xxx} placeholders, only whitespace remains.
     static bool IsPurePlaceholders(const std::wstring& s)
     {
         std::wstring out;

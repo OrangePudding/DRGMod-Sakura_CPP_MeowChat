@@ -13,8 +13,7 @@
    `FSD\Binaries\Win64\ue4ss\Mods\Sakura_CPP_MeowChat\dlls\main.dll`
 2. 确认 `ue4ss\Mods\mods.txt` 中有：
    `Sakura_CPP_MeowChat : 1`
-3. 旧 Lua 版保持关闭：`Sakura_Lua_MeowChat : 0`
-4. 启动游戏，进入任意任务后生效。
+3. 启动游戏，进入任意任务后生效。
 
 ## 配置
 mod 目录下可选 `config.txt`（UTF-8），没有则用默认值，保存后约 1 秒内生效。
