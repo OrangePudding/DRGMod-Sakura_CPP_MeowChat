@@ -405,21 +405,15 @@ namespace MeowChat
     static CallbackId g_serverHookId = 0;
     static CallbackId g_clientHookId = 0;
     static CallbackId g_localizedHookId = 0;
-    static CallbackId g_postGameHookId = 0;
-    static CallbackId g_postLocalizedHookId = 0;
     static bool g_triedServer = false;
     static bool g_triedClient = false;
     static bool g_triedLocalized = false;
     static bool g_triedChatStruct = false;
     static bool g_triedLocStruct = false;
-    static bool g_triedPostGame = false;
-    static bool g_triedPostLocalized = false;
 
     static UFunction* g_fnServerNewMessage = nullptr;
     static UFunction* g_fnClientNewMessage = nullptr;
     static UFunction* g_fnClientNewLocalized = nullptr;
-    static UFunction* g_fnPostGameMessage = nullptr;
-    static UFunction* g_fnPostLocalizedGameMessage = nullptr;
 
     // =====================================================================
     // Broadcast rewrite (see TryMeowMulticastParms below).
@@ -447,8 +441,6 @@ namespace MeowChat
     static int32_t g_offLocalizedMsgStruct = -1; // Client_NewLocalizedMessage::Msg (FFSDLocalizedChatMessage)
     static int32_t g_offLocalizedMsgField = -1;  // FFSDLocalizedChatMessage::Msg (FText)
     static int32_t g_offLocalizedSenderField = -1; // FFSDLocalizedChatMessage::Sender (FString)
-    static int32_t g_offPostGameMsg = -1;         // PostGameMessage::Msg (FString)
-    static int32_t g_offPostLocalizedMsg = -1;    // PostLocalizedGameMessage::Msg (FText)
 
     static int32_t FindPropOffset(UStruct* s, const wchar_t* name)
     {
@@ -605,54 +597,6 @@ namespace MeowChat
     }
 
     // =====================================================================
-    // Local fallback: PostGameMessage / PostLocalizedGameMessage. These did
-    // not fire in the 18:12 test session (system messages go through the
-    // Client_NewLocalizedMessage multicast instead), but are kept for
-    // coverage of any locally-posted message that skips the multicast RPCs.
-    // =====================================================================
-    static void OnPostGameMessageImpl(UnrealScriptFunctionCallableContext& ctx)
-    {
-        if (!g_fnLocals || g_offPostGameMsg < 0) return;
-        uint8_t*& localsRef = g_fnLocals(&ctx.TheStack);
-        uint8_t* parms = localsRef;
-        if (!parms) return;
-        RawFString& msg = *(RawFString*)(parms + g_offPostGameMsg);
-        std::wstring raw = ReadRawFString(msg);
-        if (raw.empty()) return;
-        std::wstring miaoed = EnsureMiao(raw);
-        if (miaoed != raw) WriteRawFString(msg, miaoed);
-    }
-
-    static void OnPostLocalizedGameMessageImpl(UnrealScriptFunctionCallableContext& ctx)
-    {
-        if (!g_fnLocals || !g_fnFTextSetString || g_offPostLocalizedMsg < 0) return;
-        uint8_t*& localsRef = g_fnLocals(&ctx.TheStack);
-        uint8_t* parms = localsRef;
-        if (!parms) return;
-        FText& msg = *(FText*)(parms + g_offPostLocalizedMsg);
-        std::wstring tpl = msg.ToString();
-        if (tpl.empty()) return;
-        std::wstring miaoed = EnsureMiao(tpl);
-        if (miaoed != tpl) ApplyMeowFText(miaoed, msg);
-    }
-
-    static void OnPostGameMessage(UnrealScriptFunctionCallableContext& ctx, void*)
-    {
-        __try { OnPostGameMessageImpl(ctx); }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-        }
-    }
-
-    static void OnPostLocalizedGameMessage(UnrealScriptFunctionCallableContext& ctx, void*)
-    {
-        __try { OnPostLocalizedGameMessageImpl(ctx); }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-        }
-    }
-
-    // =====================================================================
     // Register hooks lazily (retried from on_update until everything is up)
     // =====================================================================
     static void TryRegisterHooks()
@@ -696,29 +640,6 @@ namespace MeowChat
             }
         }
 
-        if (!g_triedPostGame)
-        {
-            g_triedPostGame = true;
-            g_fnPostGameMessage = UObjectGlobals::StaticFindObject<UFunction*>(nullptr, nullptr, L"/Script/FSD.FSDGameState:PostGameMessage");
-            if (g_fnPostGameMessage)
-            {
-                g_offPostGameMsg = FindPropOffset(g_fnPostGameMessage, L"Msg");
-                if (g_offPostGameMsg >= 0)
-                    g_postGameHookId = g_fnPostGameMessage->RegisterPreHook(OnPostGameMessage);
-            }
-        }
-
-        if (!g_triedPostLocalized)
-        {
-            g_triedPostLocalized = true;
-            g_fnPostLocalizedGameMessage = UObjectGlobals::StaticFindObject<UFunction*>(nullptr, nullptr, L"/Script/FSD.FSDGameState:PostLocalizedGameMessage");
-            if (g_fnPostLocalizedGameMessage)
-            {
-                g_offPostLocalizedMsg = FindPropOffset(g_fnPostLocalizedGameMessage, L"Msg");
-                if (g_offPostLocalizedMsg >= 0)
-                    g_postLocalizedHookId = g_fnPostLocalizedGameMessage->RegisterPreHook(OnPostLocalizedGameMessage);
-            }
-        }
         // FFSDChatMessage::Msg field offset
         if (!g_triedChatStruct)
         {
@@ -746,10 +667,8 @@ namespace MeowChat
         bool serverOk = g_fnServerNewMessage && g_offServerText >= 0;
         bool clientOk = g_fnClientNewMessage && g_offClientMsgStruct >= 0 && g_offClientMsgField >= 0;
         bool locOk = g_fnClientNewLocalized && g_offLocalizedMsgStruct >= 0 && g_offLocalizedMsgField >= 0;
-        bool postOk = g_fnPostGameMessage && g_offPostGameMsg >= 0;
-        bool postLocOk = g_fnPostLocalizedGameMessage && g_offPostLocalizedMsg >= 0;
         bool procsOk = g_fnLocals && g_fnGetNext && g_fnFTextSetString;
-        if (serverOk && clientOk && locOk && postOk && postLocOk && procsOk)
+        if (serverOk && clientOk && locOk && procsOk)
         {
             g_hooksReady = true;
         }
@@ -816,8 +735,6 @@ namespace MeowChat
             if (g_serverHookId && g_fnServerNewMessage) g_fnServerNewMessage->UnregisterHook(g_serverHookId);
             if (g_clientHookId && g_fnClientNewMessage) g_fnClientNewMessage->UnregisterHook(g_clientHookId);
             if (g_localizedHookId && g_fnClientNewLocalized) g_fnClientNewLocalized->UnregisterHook(g_localizedHookId);
-            if (g_postGameHookId && g_fnPostGameMessage) g_fnPostGameMessage->UnregisterHook(g_postGameHookId);
-            if (g_postLocalizedHookId && g_fnPostLocalizedGameMessage) g_fnPostLocalizedGameMessage->UnregisterHook(g_postLocalizedHookId);
         }
 
         void on_program_start() override
