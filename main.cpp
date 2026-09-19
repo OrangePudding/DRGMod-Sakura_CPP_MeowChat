@@ -89,7 +89,7 @@ namespace MeowChat
     static HMODULE g_ue4ss = nullptr;
     static std::wstring g_cfg_path;              // <mod dir>\config.txt
     static bool g_cfg_enabled = true;            // master switch
-    static bool g_cfg_sender_enabled = true;     // also meow the sender name
+    static bool g_cfg_sender_enabled = false;    // also meow the sender name
     static std::wstring g_cfg_suffix = L"\u55B5"; // appended text (default: meow)
     static ULONGLONG g_cfg_check_tick = 0;       // reload throttle
     static bool g_cfg_had_file = false;
@@ -163,7 +163,7 @@ namespace MeowChat
     static void ResetConfigDefaults()
     {
         g_cfg_enabled = true;
-        g_cfg_sender_enabled = true;
+        g_cfg_sender_enabled = false;
         g_cfg_suffix = L"\u55B5";
     }
 
